@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+pnpm exec commitlint --config commitlint.config.mjs --edit "${1}"
