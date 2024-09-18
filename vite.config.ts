@@ -1,3 +1,4 @@
+import {resolve } from 'node:path'
 import vue from "@vitejs/plugin-vue";
 import AutoImport from "unplugin-auto-import/vite";
 import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
@@ -15,4 +16,13 @@ export default defineConfig({
       resolvers: [ElementPlusResolver()],
     }),
   ],
+  resolve: {
+    alias: [
+      // 设置 ./src路径为@
+      {
+        find: "@",
+        replacement: resolve(__dirname, "./src")
+      }
+    ]
+  }
 });
