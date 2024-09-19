@@ -45,6 +45,7 @@
 import { Lock, User } from '@element-plus/icons-vue';
 import { reactive, ref } from 'vue';
 import type { FormInstance, FormRules } from 'element-plus';
+import { sysUser } from "@/api"
 
 interface LoginForm {
   username: string;
@@ -71,9 +72,8 @@ async function submitForm(formEl: FormInstance | undefined) {
   await formEl.validate((valid: boolean) => {
     if (valid) {
       // vue3 axios封装统一处理接口
-    }
-    else {
-      return false;
+      const result = sysUser.login({username: loginForm.username, password: loginForm.password, verifyCode: 'n24e'});
+      console.log(result);
     }
   });
 }

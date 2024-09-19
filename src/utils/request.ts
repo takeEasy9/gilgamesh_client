@@ -2,13 +2,11 @@
 /* eslint-disable ts/no-unsafe-member-access */
 /* eslint-disable ts/no-unsafe-assignment */
 import router from '@/router';
-import { createFetch } from '@vueuse/core';
-import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, HttpStatusCode, type Method } from 'axios';
+import axios, { type AxiosInstance, type AxiosInterceptorOptions, type AxiosRequestConfig, type AxiosResponse, HttpStatusCode, type InternalAxiosRequestConfig } from 'axios';
 import { ElMessage } from 'element-plus';
-import type { useFetch, UseFetchOptions, UseFetchReturn } from '@vueuse/core';
 
 // 接口响应格式
-export interface ApiResult<T> {
+export interface ApiResult<T = any> {
   /**
    * 响应码
    */
@@ -22,123 +20,134 @@ export interface ApiResult<T> {
    */
   data?: T;
 }
-
+// 请求默认超时时间, 单位毫秒
 export const DEFALUT_TIME_OUT = 5000;
-// 创建axios对象
-const axiosInstance: AxiosInstance = axios.create({
-  // 请求超时时间 5000 ms
-  timeout: DEFALUT_TIME_OUT,
-});
-// 请求拦截器
-axiosInstance.interceptors.request.use((config) => {
-  // todo 统一在http请求的header都加上token
-  return config;
-}, async (error) => {
-  return Promise.reject(error);
-});
-// 响应拦截器
-axiosInstance.interceptors.response.use(
-  response => response,
-  async (error) => {
-    const rejectPromise = Promise.reject(error);
-    // 请求已取消
-    if (axios.isCancel(error)) {
-      return rejectPromise;
-    }
-    const statusCode = error.response?.status;
-    if (statusCode != null) {
-      return rejectPromise;
-    }
-    switch (statusCode) {
-      // 401: 未登录
-      case axios.HttpStatusCode.Unauthorized:
-        await router.replace({
-          path: '/login',
-          query: { redirect: router.currentRoute.value.fullPath },
-        });
-        break;
-        // 403 token过期
-      case HttpStatusCode.Forbidden:
-        // todo 清除token 跳转登陆页面
-        break;
-        // 404请求不存在
-      case HttpStatusCode.NotFound:
-        // todo
-        break;
-        // 服务器未知异常
-      case HttpStatusCode.InternalServerError:
-        // todo
-        break;
-      default:
-        if (error.message != null) {
-          ElMessage.error(error.message);
-        }
-        else {
-          ElMessage.error('网络请求错误');
-        }
-        return rejectPromise;
-    }
-  },
-);
 
-type UseFetchType = typeof useFetch;
-const useFetchInstance: UseFetchType = createFetch({
-  combination: 'chain',
-  options: {
-    immediate: false,
-    timeout: DEFALUT_TIME_OUT,
-    async beforeFetch({ options }) {
-      const headers = new Headers(options.headers || {});
-      // todo 设置 token
-      headers.set('Content-Type', 'application/json');
-      options.headers = headers;
-
-      return { options };
-    },
-    async afterFetch(ctx) {
-      const result = await ctx.response.json();
-      ctx.data = result;
-      return ctx;
-    },
-  },
-});
-
-interface RequestConfig {
-  baseURL?: string;
-  timeout?: number;
+// axios 拦截器
+export interface AxiosInterceptor<V = any> {
+  // 处理成功的逻辑
+  onFulfilled?: ((value: V) => V | Promise<V>) | null;
+  // 处理失败的逻辑
+  onRejected?: ((error: any) => any) | null;
+  // 拦截器配置
+  options?: AxiosInterceptorOptions;
 }
 
-async function xhrRequest<T, D>(method: Method, url: string, params?: D, options?: RequestConfig): Promise<ApiResult<T>> {
-  if (url != null || url === '') {
-    throw new Error('请求url不能为空');
-  }
-  const config: AxiosRequestConfig<D> = {
-    method,
-    url,
-    ...options,
+// axios xhr 请求
+export default class AxiosRequest {
+  // axios 实例
+  instance: AxiosInstance;
+  // 基础配置 超时时间
+  baseConfig: AxiosRequestConfig = { timeout: DEFALUT_TIME_OUT };
+  // 默认请求拦截器
+  defaultRequestInterceptor: AxiosInterceptor = {
+    onFulfilled: (config: InternalAxiosRequestConfig) => {
+      // todo 添加token
+      return config;
+    },
+    onRejected: async (error: any) => {
+      // 请求错误，这里可以用全局提示框进行提示
+      return Promise.reject(error);
+    },
   };
-  // post和put使用json格式传参
-  if (method === 'post' || method === 'put' || method === 'POST' || method === 'PUT') {
-    config.data = params;
-  }
-  else {
-    config.params = params;
-  }
-  return axiosInstance
-    .request<ApiResult<T>>(config)
-    .then(async (response) => {
-      // 获取请求返回结果
-      const result: ApiResult<T> = response.data;
-      return apiResultHandler(result);
-    })
-    .catch(async (e) => {
-      return Promise.reject(e);
-    });
-}
 
-async function apiResultHandler<T>(result: ApiResult<T>): Promise<T | undefined> {
-  if (result.code === '1401') {
-    return result.data;
+  // 默认响应拦截器
+  defaultResponseInterceptor: AxiosInterceptor = {
+    onFulfilled: (response: AxiosResponse<ApiResult>) => {
+      // 直接返回res，当然你也可以只返回res.data
+      // 系统如果有自定义code也可以在这里处理
+      const data: ApiResult = response.data;
+      return data;
+    },
+    onRejected: async (error: any) => {
+      const rejectPromise = Promise.reject(error);
+      // 请求已取消
+      if (axios.isCancel(error)) {
+        return rejectPromise;
+      }
+      const statusCode = error.response?.status;
+      if (statusCode != null) {
+        return rejectPromise;
+      }
+      switch (statusCode) {
+        // 401: 未登录
+        case axios.HttpStatusCode.Unauthorized:
+          await router.replace({
+            path: '/login',
+            query: { redirect: router.currentRoute.value.fullPath },
+          });
+          break;
+          // 403 token过期
+        case HttpStatusCode.Forbidden:
+          // todo 清除token 跳转登陆页面
+          break;
+          // 404请求不存在
+        case HttpStatusCode.NotFound:
+          // todo
+          break;
+          // 服务器未知异常
+        case HttpStatusCode.InternalServerError:
+          // todo
+          break;
+        default:
+          if (error.message != null) {
+            ElMessage.error(error.message);
+          }
+          else {
+            ElMessage.error('网络请求错误');
+          }
+          return rejectPromise;
+      }
+    },
+  };
+
+  constructor(config: AxiosRequestConfig, requestInterceptor?: AxiosInterceptor, responseInterceptor?: AxiosInterceptor) {
+    // 创建axios对象
+    this.instance = axios.create(Object.assign(this.baseConfig, config));
+    requestInterceptor = requestInterceptor ?? this.defaultRequestInterceptor;
+    // 设置请求拦截器
+    this.instance.interceptors.request.use(
+      requestInterceptor.onFulfilled ?? this.defaultRequestInterceptor.onFulfilled,
+      requestInterceptor.onRejected ?? this.defaultRequestInterceptor.onRejected,
+      requestInterceptor.options ?? this.defaultRequestInterceptor.options,
+    );
+    // 设置响应拦截器
+    responseInterceptor = responseInterceptor ?? this.defaultResponseInterceptor;
+    this.instance.interceptors.response.use(responseInterceptor.onFulfilled ?? this.defaultResponseInterceptor.onFulfilled, responseInterceptor.onRejected ?? this.defaultResponseInterceptor.onRejected, responseInterceptor.options ?? this.defaultResponseInterceptor.options);
   }
-  return Promise.reject(result);
+
+  // 定义请求方法
+  public async request(config: AxiosRequestConfig): Promise<AxiosResponse> {
+    return this.instance.request(config);
+  }
+
+  public async get<T = any>(
+    url: string,
+    config?: Omit<AxiosRequestConfig, 'url'>,
+  ): Promise<ApiResult<T>> {
+    return this.instance.get(url, config);
+  }
+
+  public async post<T = any>(
+    url: string,
+    data?: any,
+    config?: Omit<AxiosRequestConfig, 'url' | 'data'>,
+  ): Promise<ApiResult<T>> {
+    return this.instance.post(url, data, config);
+  }
+
+  public async put<T = any>(
+    url: string,
+    data?: any,
+    config?: Omit<AxiosRequestConfig, 'url' | 'data'>,
+  ): Promise<ApiResult<T>> {
+    return this.instance.put(url, data, config);
+  }
+
+  public async delete<T = any>(
+    url: string,
+    config?: Omit<AxiosRequestConfig, 'url'>,
+  ): Promise<ApiResult<T>> {
+    return this.instance.delete(url, config);
+  }
 }
